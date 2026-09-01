@@ -65,11 +65,6 @@ function formatMetric(value: number | null) {
   return value === null ? "—" : formatNumber(value);
 }
 
-function csvCell(value: unknown) {
-  const text = String(value ?? "");
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
 export function TikTokStatsApp() {
   const [accessCode, setAccessCode] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -190,17 +185,18 @@ export function TikTokStatsApp() {
   }
 
   function exportCsv() {
-    const headings = ["序号", "类型", "视频链接", "作者", "发布时间（北京时间）", "播放量", "点赞数", "评论数", "收藏数", "分享数", "抓取时间", "状态", "错误"];
-    const rows = results.map((item, index) => [index + 1, item.contentType === "photo" ? "图文" : "视频", item.url, item.author, item.publishedAt, item.views, item.likes, item.comments, item.saves, item.shares, item.fetchedAt, item.status === "success" ? "成功" : item.status === "error" ? "失败" : "未完成", item.error]);
-    rows.push(["合计", "", "", `成功 ${summary.success} 条`, "", summary.totals.views, summary.totals.likes, summary.totals.comments, summary.totals.saves, summary.totals.shares, "", "", ""]);
-    const content = "\ufeff" + [headings, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
-    link.download = `tiktok-data-${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/export";
+    form.target = "_self";
+    form.hidden = true;
+    for (const [name, value] of Object.entries({ accessCode, payload: JSON.stringify({ results, summary }) })) {
+      const field = document.createElement("input");
+      field.type = "hidden"; field.name = name; field.value = value; form.appendChild(field);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    window.setTimeout(() => form.remove(), 1000);
   }
 
   if (!authorized) {
