@@ -65,6 +65,17 @@ function formatMetric(value: number | null) {
   return value === null ? "—" : formatNumber(value);
 }
 
+function friendlyError(message: string) {
+  const value = message.toLowerCase();
+  if (value.includes("item doesn't exist") || value.includes("not found")) return "内容不存在或已下架";
+  if (value.includes("status_deleted") || value.includes("deleted")) return "内容已被删除";
+  if (value.includes("privacy") || value.includes("private")) return "内容为私密或账号无权访问";
+  if (value.includes("403") || value.includes("429") || value.includes("限制访问")) return "TikTok 暂时限制访问，请稍后重试";
+  if (value.includes("timeout") || value.includes("timed out") || value.includes("aborted")) return "请求超时，请稍后重试";
+  if (value.includes("network") || value.includes("连接")) return "网络连接失败，请稍后重试";
+  return message || "未知错误，请稍后重试";
+}
+
 export function TikTokStatsApp() {
   const [accessCode, setAccessCode] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -134,7 +145,7 @@ export function TikTokStatsApp() {
       if (!response.ok) throw new Error(data.error || "获取失败");
       updateResult(item.key, { ...data, status: "success", error: "" });
     } catch (error) {
-      updateResult(item.key, { status: "error", error: error instanceof Error ? error.message : "获取失败", fetchedAt: new Date().toLocaleString("zh-CN", { hour12: false }) });
+      updateResult(item.key, { status: "error", error: friendlyError(error instanceof Error ? error.message : "获取失败"), fetchedAt: new Date().toLocaleString("zh-CN", { hour12: false }) });
     }
   }
 
@@ -263,10 +274,10 @@ export function TikTokStatsApp() {
           <div className="aggregate-item"><span>总分享</span><strong title={String(summary.totals.shares)}>{formatMetric(summary.totals.shares)}</strong></div>
         </div>
         <div className="table-wrap">
-          <table><thead><tr><th>#</th><th>状态</th><th>内容</th><th>发布时间</th><th>播放量</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>抓取时间</th><th>链接</th></tr></thead>
+          <table><thead><tr><th>#</th><th>状态</th><th>失败原因</th><th>内容</th><th>发布时间</th><th>播放量</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>抓取时间</th><th>链接</th></tr></thead>
             <tbody>{visibleResults.length ? visibleResults.map((item, index) => (
-              <tr key={item.key}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span>{item.error && <span className="error-text" title={item.error}>{item.error}</span>}</td><td className="video-cell"><strong>{item.author ? `@${item.author}` : `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.description || "等待获取内容信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">打开</a></td></tr>
-            )) : <tr><td className="empty-row" colSpan={11}>结果会在这里逐条出现</td></tr>}</tbody>
+              <tr key={item.key}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span></td><td className="reason-cell" title={item.error}>{item.status === "error" ? item.error : "—"}</td><td className="video-cell"><strong>{item.author ? `@${item.author}` : `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.description || "等待获取内容信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">打开</a></td></tr>
+            )) : <tr><td className="empty-row" colSpan={12}>结果会在这里逐条出现</td></tr>}</tbody>
           </table>
         </div>
         <div className="pager"><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div>
