@@ -36,7 +36,7 @@ function collectLinks(text: string) {
     links.push({ key: id, url: value, type: rawType.toLowerCase() as "video" | "photo", id });
   }
   const allExternal = text.match(/https?:\/\/[^\s<>"'\]\)]+/gi) ?? [];
-  const ignored = allExternal.filter((value) => !/tiktok\.com/i.test(value)).length;
+  const ignored = new Set(allExternal.filter((value) => !/tiktok\.com/i.test(value))).size;
   return { links, ignored };
 }
 
@@ -197,7 +197,10 @@ export function TikTokStatsApp() {
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
     link.download = `tiktok-data-${new Date().toISOString().slice(0,10)}.csv`;
-    link.click(); URL.revokeObjectURL(link.href);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
 
   if (!authorized) {
