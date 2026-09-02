@@ -247,7 +247,7 @@ export function TikTokStatsApp() {
             </div>
             <button className="btn btn-quiet" type="button" disabled={running} onClick={() => setInput("")}>清空</button>
           </div>
-          <p className="inline-note"><strong>已识别 {formatNumber(parsed.links.length)} 条 TikTok 内容</strong>{parsed.ignored ? `，忽略 ${formatNumber(parsed.ignored)} 个其他平台链接` : ""}。最多同时处理 {CONCURRENCY} 条，请保持页面打开。</p>
+        <p className="inline-note"><strong>已识别 {formatNumber(parsed.links.length)} 条 TikTok 内容</strong>{parsed.ignored ? `，忽略 ${formatNumber(parsed.ignored)} 个其他平台链接` : ""}。支持批量链接，系统会自动排队处理；处理期间请保持页面打开。</p>
         </div>
 
         <aside className="card task-card" aria-label="任务进度">
