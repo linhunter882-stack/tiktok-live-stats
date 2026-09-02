@@ -20,22 +20,6 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-async function snapshotTrackedAccounts(env: Env) {
-  if (!env.ACCESS_CODE || !env.DB) return;
-  const cutoff = Date.now() - 20 * 60 * 60 * 1000;
-  const accounts = await env.DB.prepare("SELECT username FROM follower_snapshots GROUP BY username HAVING MAX(observed_at) < ? ORDER BY MAX(observed_at) ASC LIMIT 50")
-    .bind(cutoff).all<{ username: string }>();
-  const rows = accounts.results ?? [];
-  for (let index = 0; index < rows.length; index += 5) {
-    const now = Math.floor(Date.now() / 1000);
-    await Promise.allSettled(rows.slice(index, index + 5).map(({ username }) => fetch("https://tiktok-data.tuli7.com/api/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-access-code": env.ACCESS_CODE! },
-      body: JSON.stringify({ username, cursor: Date.now(), rangeStart: now - 86_400, rangeEnd: now + 1 }),
-    })));
-  }
-}
-
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -66,9 +50,6 @@ const worker = {
     headers.set("Referrer-Policy", "no-referrer");
     headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-  },
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(snapshotTrackedAccounts(env));
   },
 };
 

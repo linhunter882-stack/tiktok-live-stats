@@ -7,15 +7,6 @@
     "nodejs_compat_populate_process_env"
   ],
   "main": "./worker/index.ts",
-  "routes": [
-    {
-      "pattern": "tiktok-data.tuli7.com",
-      "custom_domain": true
-    }
-  ],
-  "triggers": {
-    "crons": ["17 */6 * * *"]
-  },
   "d1_databases": [
     {
       "binding": "DB",
