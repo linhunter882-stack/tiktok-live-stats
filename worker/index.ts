@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 
 interface Env {
   ASSETS: Fetcher;
+  ACCESS_CODE?: string;
   DB: D1Database;
   IMAGES: {
     input(stream: ReadableStream): {
@@ -27,6 +28,7 @@ interface ExecutionContext {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    if (env.ACCESS_CODE) process.env.ACCESS_CODE = env.ACCESS_CODE;
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image") {

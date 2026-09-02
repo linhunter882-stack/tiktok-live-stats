@@ -282,6 +282,12 @@ export async function POST(request: Request) {
     const statusCode = Number(data?.statusCode ?? data?.status_code ?? 0);
     const statusMessage = String(data?.statusMsg ?? data?.status_msg ?? "");
     if (statusCode) throw upstreamError(`${statusMessage} ${statusCode}`.trim());
+    // TikTok omits itemList entirely for valid public accounts with no videos.
+    // Treat that response as an empty successful page instead of a fetch failure.
+    if (!Array.isArray(data?.itemList) && profile?.videoCount === 0 && !hasMoreValue(data?.hasMorePrevious ?? data?.hasMore)) {
+      const nextCursor = Math.max(earliestCursor, cursor - 7 * 86_400_000);
+      return Response.json({ profile, secUid, deviceId, cursor, nextCursor, hasMore: false, items: [] }, { headers: noStore });
+    }
     if (!Array.isArray(data?.itemList)) throw new ApiError("TikTok 未返回账号视频数据，请稍后重试", 502);
 
     const items = data.itemList
