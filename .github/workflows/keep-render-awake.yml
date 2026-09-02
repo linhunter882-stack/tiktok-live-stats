@@ -1,8 +1,11 @@
 name: Keep Render service awake
 
 on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/keep-render-awake.yml]
   schedule:
-    - cron: "3,13,23,33,43,53 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
