@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { selectedRange } from "../app/date-range.ts";
 import { sortResults } from "../app/result-sort.ts";
 
 async function render(path = "/") {
@@ -87,4 +88,14 @@ test("sorts the complete result set and keeps unavailable values last", () => {
   assert.deepEqual(sortResults(rows, "views", "asc").map((item) => item.id), ["low", "high", "missing", "failed"]);
   assert.deepEqual(sortResults(rows, "publishedAt", "desc").map((item) => item.id), ["high", "missing", "low", "failed"]);
   assert.deepEqual(rows.map((item) => item.id), ["high", "low", "missing", "failed"]);
+});
+
+test("accepts a single Beijing day and caps custom ranges at three months", () => {
+  const singleDay = selectedRange("custom", "", "2026-08-13", "2026-08-13");
+  assert.equal(singleDay.start, Date.UTC(2026, 7, 13) / 1000 - 8 * 3600);
+  assert.equal(singleDay.end - singleDay.start, 86_400);
+  assert.match(singleDay.label, /单日/);
+  assert.doesNotThrow(() => selectedRange("custom", "", "2026-06-01", "2026-08-31"));
+  assert.throws(() => selectedRange("custom", "", "2026-06-01", "2026-09-01"), /最长为 3 个月/);
+  assert.throws(() => selectedRange("custom", "", "2026-08-14", "2026-08-13"), /不能早于/);
 });

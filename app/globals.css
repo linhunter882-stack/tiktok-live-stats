@@ -78,6 +78,9 @@ textarea:hover { border-color: #c795a5; }
 textarea::placeholder { color: #9a878e; }
 .drop-active textarea { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(23,92,211,.12); }
 .profile-form { display: grid; grid-template-columns: minmax(240px,1.45fr) minmax(220px,1fr) minmax(170px,.75fr); gap: 14px; margin-top: 18px; align-items: end; }
+.profile-form-quick { grid-template-columns: minmax(240px,1.45fr) minmax(260px,1fr); }
+.profile-form-custom { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.custom-date-fields { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .field { display: grid; gap: 7px; min-width: 0; }
 .field > span, .range-field legend { color: var(--ink); font-size: .83rem; font-weight: 750; }
 .field input {
@@ -86,10 +89,9 @@ textarea::placeholder { color: #9a878e; }
 }
 .field input:hover:not(:disabled) { border-color: #c795a5; }
 .field input:disabled { cursor: not-allowed; opacity: .58; background: #f7f2f4; }
-.field-muted > span { color: var(--muted); }
 .range-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .range-field legend { margin-bottom: 7px; }
-.range-options { min-height: 48px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 5px; border: 1px solid #d8c1c9; border-radius: 12px; background: #fff; }
+.range-options { min-height: 48px; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; padding: 5px; border: 1px solid #d8c1c9; border-radius: 12px; background: #fff; }
 .range-options label { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 7px; border-radius: 8px; color: var(--muted); font-size: .84rem; font-weight: 700; cursor: pointer; }
 .range-options label:has(input:checked) { color: var(--primary-dark); background: var(--soft); }
 .range-options input { accent-color: var(--primary); }
@@ -180,7 +182,7 @@ tbody tr:hover { background: #fffafb; }
   .main-grid { grid-template-columns: 1fr; }
   .task-card { min-height: 290px; }
   .profile-form { grid-template-columns: 1fr 1fr; }
-  .profile-form .field:first-child { grid-column: span 2; }
+  .profile-form > .field:first-child, .profile-form-quick .range-field, .profile-form-custom .range-field { grid-column: span 2; }
 }
 @media (max-width: 620px) {
   .app-shell { width: min(100% - 20px,1440px); padding-top: 18px; }
@@ -189,7 +191,8 @@ tbody tr:hover { background: #fffafb; }
   .mode-tabs { display: grid; width: 100%; }
   .mode-tabs button { padding-inline: 9px; }
   .profile-form { grid-template-columns: 1fr; }
-  .profile-form .field:first-child { grid-column: auto; }
+  .profile-form > .field:first-child, .profile-form-quick .range-field, .profile-form-custom .range-field, .custom-date-fields { grid-column: auto; }
+  .custom-date-fields { grid-template-columns: 1fr; }
   .actions, .action-group { width: 100%; }
   .btn-primary { flex: 1; }
   .results-head { flex-direction: column; }

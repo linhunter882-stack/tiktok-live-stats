@@ -1,11 +1,11 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { beijingDate, beijingMonth, selectedRange, type RangeMode } from "./date-range";
 import { sortResults, type SortDirection, type SortKey } from "./result-sort";
 
 type Status = "queued" | "running" | "success" | "error";
 type Mode = "links" | "profile";
-type RangeMode = "sevenDays" | "month";
 type Metrics = { views: number | null; likes: number | null; comments: number | null; saves: number | null; shares: number | null };
 type Result = Metrics & {
   key: string;
@@ -37,24 +37,6 @@ const TIKTOK_URL = /https?:\/\/(?:(?:www|m|vm|vt)\.)?tiktok\.com\/[^\s<>"'\]\)]+
 const CONTENT_ID = /\/(video|photo)\/(\d{15,25})/i;
 const CONCURRENCY = 4;
 const EMPTY_METRICS: Metrics = { views: 0, likes: 0, comments: 0, saves: 0, shares: 0 };
-const DAY_SECONDS = 86_400;
-
-function beijingMonth() {
-  return new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
-}
-
-function selectedRange(mode: RangeMode, month: string) {
-  const now = Math.floor(Date.now() / 1000);
-  if (mode === "sevenDays") return { start: now - 7 * DAY_SECONDS, end: now + 1, label: "近 7 天" };
-  const match = month.match(/^(\d{4})-(\d{2})$/);
-  if (!match) throw new Error("请选择查询月份");
-  const year = Number(match[1]);
-  const monthIndex = Number(match[2]) - 1;
-  const start = Date.UTC(year, monthIndex, 1) / 1000 - 8 * 3600;
-  const end = Math.min(Date.UTC(year, monthIndex + 1, 1) / 1000 - 8 * 3600, now + 1);
-  if (start > now) throw new Error("不能查询未来月份");
-  return { start, end, label: `${year} 年 ${monthIndex + 1} 月` };
-}
 
 function collectLinks(text: string) {
   const seen = new Set<string>();
@@ -118,6 +100,8 @@ export function TikTokStatsApp() {
   const [profileInput, setProfileInput] = useState("");
   const [rangeMode, setRangeMode] = useState<RangeMode>("sevenDays");
   const [month, setMonth] = useState(beijingMonth);
+  const [customStart, setCustomStart] = useState(beijingDate);
+  const [customEnd, setCustomEnd] = useState(beijingDate);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo | null>(null);
   const [profileProgress, setProfileProgress] = useState({ pages: 0, scanned: 0 });
   const [activeRangeLabel, setActiveRangeLabel] = useState("");
@@ -157,6 +141,7 @@ export function TikTokStatsApp() {
   const sortedResults = useMemo(() => sortResults(results, sortKey, sortDirection), [results, sortKey, sortDirection]);
   const pages = Math.max(1, Math.ceil(results.length / pageSize));
   const visibleResults = sortedResults.slice((page - 1) * pageSize, page * pageSize);
+  const draftRangeLabel = rangeMode === "sevenDays" ? "近 7 天" : rangeMode === "month" ? month : customStart === customEnd ? `${customStart}（单日）` : `${customStart} 至 ${customEnd}`;
 
   function changeSort(key: SortKey) {
     setSortDirection(sortKey === key && sortDirection === "desc" ? "asc" : "desc");
@@ -234,7 +219,7 @@ export function TikTokStatsApp() {
   async function startProfile() {
     if (!profileInput.trim() || running) return;
     let range: ReturnType<typeof selectedRange>;
-    try { range = selectedRange(rangeMode, month); }
+    try { range = selectedRange(rangeMode, month, customStart, customEnd); }
     catch (error) { setTaskError(error instanceof Error ? error.message : "时间范围不正确"); return; }
 
     cancelledRef.current = false; setCancelled(false); setRunning(true); setTaskError("");
@@ -361,19 +346,21 @@ export function TikTokStatsApp() {
             <p className="inline-note"><strong>已识别 {formatNumber(parsed.links.length)} 条 TikTok 内容</strong>{parsed.ignored ? `，忽略 ${formatNumber(parsed.ignored)} 个其他平台链接` : ""}。支持批量链接，系统会自动排队处理；处理期间请保持页面打开。</p>
           </> : <>
             <div className="input-head"><div><h2>查询账号公开视频</h2><p className="helper">输入 @用户名或 TikTok 主页链接，自动按时间筛选并汇总</p></div><span className="count-pill">单账号</span></div>
-            <div className="profile-form">
+            <div className={`profile-form ${rangeMode === "custom" ? "profile-form-custom" : rangeMode === "sevenDays" ? "profile-form-quick" : ""}`}>
               <label className="field" htmlFor="profile-input"><span>TikTok 账号</span><input id="profile-input" type="text" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder="@_vanybunny_ 或主页链接" /></label>
               <fieldset className="range-field"><legend>时间范围</legend><div className="range-options">
                 <label><input type="radio" name="range" value="sevenDays" checked={rangeMode === "sevenDays"} disabled={running} onChange={() => setRangeMode("sevenDays")} />近 7 天</label>
-                <label><input type="radio" name="range" value="month" checked={rangeMode === "month"} disabled={running} onChange={() => setRangeMode("month")} />指定月份</label>
+                <label><input type="radio" name="range" value="month" checked={rangeMode === "month"} disabled={running} onChange={() => setRangeMode("month")} />整月</label>
+                <label><input type="radio" name="range" value="custom" checked={rangeMode === "custom"} disabled={running} onChange={() => setRangeMode("custom")} />自定义</label>
               </div></fieldset>
-              <label className={`field month-field ${rangeMode === "month" ? "" : "field-muted"}`} htmlFor="profile-month"><span>月份</span><input id="profile-month" type="month" value={month} max={beijingMonth()} disabled={running || rangeMode !== "month"} onChange={(event) => setMonth(event.target.value)} /></label>
+              {rangeMode === "month" && <label className="field month-field" htmlFor="profile-month"><span>月份</span><input id="profile-month" type="month" value={month} max={beijingMonth()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => setMonth(event.target.value)} /></label>}
+              {rangeMode === "custom" && <div className="custom-date-fields"><label className="field" htmlFor="profile-start-date"><span>开始日期</span><input id="profile-start-date" type="date" value={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => { const value = event.target.value; setCustomStart(value); if (customEnd && value > customEnd) setCustomEnd(value); }} /></label><label className="field" htmlFor="profile-end-date"><span>结束日期（包含当天）</span><input id="profile-end-date" type="date" value={customEnd} min={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => setCustomEnd(event.target.value)} /></label></div>}
             </div>
             <div className="actions">
               <div className="action-group"><button className="btn btn-primary" type="button" disabled={!profileInput.trim() || running} onClick={() => void startProfile()}>查询账号数据</button>{running && <button className="btn btn-secondary" type="button" onClick={stop}>停止查询</button>}</div>
               <button className="btn btn-quiet" type="button" disabled={running} onClick={() => setProfileInput("")}>清空</button>
             </div>
-            <p className="inline-note"><strong>统计该时间段发布内容的当前累计数据</strong>，不是该时间段内新增的播放量；公开账号无需登录。</p>
+            <p id="profile-range-note" className="inline-note"><strong>自定义范围支持单日查询，最长连续 3 个月</strong>；统计的是该期间发布内容当前的累计数据。</p>
           </>}
         </div>
 
@@ -394,7 +381,7 @@ export function TikTokStatsApp() {
               <div className="stat"><span className="stat-label">匹配内容</span><strong>{formatNumber(summary.success)}</strong></div>
               <div className="stat"><span className="stat-label">已扫描</span><strong>{formatNumber(profileProgress.scanned)}</strong></div>
               <div className="stat"><span className="stat-label">已翻页</span><strong>{formatNumber(profileProgress.pages)}</strong></div>
-              <div className="stat stat-text"><span className="stat-label">查询范围</span><strong>{activeRangeLabel || (rangeMode === "sevenDays" ? "近 7 天" : month)}</strong></div>
+              <div className="stat stat-text"><span className="stat-label">查询范围</span><strong>{activeRangeLabel || draftRangeLabel}</strong></div>
             </div>
             <div className="progress-wrap"><div className="progress-meta"><span>账号扫描</span><span>{running ? "进行中" : profileInfo ? "完成" : "等待"}</span></div><div className="progress" role="progressbar" aria-label="账号扫描进度" aria-valuetext={running ? "正在扫描" : "扫描结束"}><div className={`progress-bar ${running ? "progress-scanning" : ""}`} style={{ width: running ? "58%" : profileInfo ? "100%" : "0%" }} /></div></div>
             <div className="task-message" aria-live="polite">{taskError ? <span className="task-error" role="alert">{taskError}</span> : running ? `正在扫描${profileInfo?.username ? ` @${profileInfo.username}` : "账号"}，已查看 ${formatNumber(profileProgress.scanned)} 条。` : cancelled ? "查询已停止，当前结果可以继续查看或导出。" : profileInfo ? `@${profileInfo.username} 在${activeRangeLabel}内共有 ${formatNumber(summary.success)} 条公开内容。` : "输入账号和时间范围后开始查询。"}</div>
