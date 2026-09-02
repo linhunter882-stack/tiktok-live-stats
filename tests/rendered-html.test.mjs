@@ -21,6 +21,13 @@ test("renders the finished TikTok data tool", async () => {
   assert.equal(response.headers.get("x-frame-options"), "DENY");
 });
 
+test("health endpoint stays cheap for keepalive checks", async () => {
+  const response = await render("/api/health");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
 test("normalizes one public profile page with complete metrics", async () => {
   const originalFetch = globalThis.fetch;
   const originalCode = process.env.ACCESS_CODE;
