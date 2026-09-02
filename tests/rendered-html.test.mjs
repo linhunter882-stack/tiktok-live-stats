@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sortResults } from "../app/result-sort.ts";
 
 async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -73,4 +74,17 @@ test("normalizes one public profile page with complete metrics", async () => {
     if (originalCode === undefined) delete process.env.ACCESS_CODE;
     else process.env.ACCESS_CODE = originalCode;
   }
+});
+
+test("sorts the complete result set and keeps unavailable values last", () => {
+  const rows = [
+    { id: "high", status: "success", publishedAt: "2026-08-03 08:00:00", fetchedAt: "2026-09-02 10:00:00", views: 100, likes: 8, comments: 4, saves: 2, shares: 1 },
+    { id: "low", status: "success", publishedAt: "2026-08-01 08:00:00", fetchedAt: "2026/9/2 9:00:00", views: 20, likes: 3, comments: 1, saves: 0, shares: 0 },
+    { id: "missing", status: "success", publishedAt: "2026-08-02 08:00:00", fetchedAt: "", views: null, likes: null, comments: null, saves: null, shares: null },
+    { id: "failed", status: "error", publishedAt: "", fetchedAt: "2026-09-02 11:00:00", views: 999, likes: 999, comments: 999, saves: 999, shares: 999 },
+  ];
+  assert.deepEqual(sortResults(rows, "views", "desc").map((item) => item.id), ["high", "low", "missing", "failed"]);
+  assert.deepEqual(sortResults(rows, "views", "asc").map((item) => item.id), ["low", "high", "missing", "failed"]);
+  assert.deepEqual(sortResults(rows, "publishedAt", "desc").map((item) => item.id), ["high", "missing", "low", "failed"]);
+  assert.deepEqual(rows.map((item) => item.id), ["high", "low", "missing", "failed"]);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { sortResults, type SortDirection, type SortKey } from "./result-sort";
 
 type Status = "queued" | "running" | "success" | "error";
 type Mode = "links" | "profile";
@@ -34,7 +35,6 @@ type ProfilePage = {
 
 const TIKTOK_URL = /https?:\/\/(?:(?:www|m|vm|vt)\.)?tiktok\.com\/[^\s<>"'\]\)]+/gi;
 const CONTENT_ID = /\/(video|photo)\/(\d{15,25})/i;
-const PAGE_SIZE = 50;
 const CONCURRENCY = 4;
 const EMPTY_METRICS: Metrics = { views: 0, likes: 0, comments: 0, saves: 0, shares: 0 };
 const DAY_SECONDS = 86_400;
@@ -126,6 +126,9 @@ export function TikTokStatsApp() {
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<50 | 100 | 200>(50);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const cancelledRef = useRef(false);
@@ -151,8 +154,20 @@ export function TikTokStatsApp() {
   }, [results]);
 
   const percent = summary.total ? Math.round(summary.done / summary.total * 100) : 0;
-  const pages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
-  const visibleResults = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sortedResults = useMemo(() => sortResults(results, sortKey, sortDirection), [results, sortKey, sortDirection]);
+  const pages = Math.max(1, Math.ceil(results.length / pageSize));
+  const visibleResults = sortedResults.slice((page - 1) * pageSize, page * pageSize);
+
+  function changeSort(key: SortKey) {
+    setSortDirection(sortKey === key && sortDirection === "desc" ? "asc" : "desc");
+    setSortKey(key); setPage(1);
+  }
+
+  function sortableHeader(label: string, key: SortKey) {
+    const active = sortKey === key;
+    const ariaSort: "none" | "ascending" | "descending" = active ? (sortDirection === "asc" ? "ascending" : "descending") : "none";
+    return <th className="sortable-th" aria-sort={ariaSort}><button className={`sort-button ${active ? "active" : ""}`} type="button" aria-label={`按${label}排序${active ? `，当前${sortDirection === "desc" ? "从高到低" : "从低到高"}` : "，默认从高到低"}`} onClick={() => changeSort(key)}><span>{label}</span><span className="sort-mark" aria-hidden="true">{active ? (sortDirection === "desc" ? "↓" : "↑") : "↕"}</span></button></th>;
+  }
 
   function changeMode(next: Mode) {
     if (running || next === mode) return;
@@ -291,7 +306,7 @@ export function TikTokStatsApp() {
     form.action = "/api/export";
     form.target = "_self";
     form.hidden = true;
-    for (const [name, value] of Object.entries({ accessCode, payload: JSON.stringify({ results, summary }) })) {
+    for (const [name, value] of Object.entries({ accessCode, payload: JSON.stringify({ results: sortedResults, summary }) })) {
       const field = document.createElement("input");
       field.type = "hidden"; field.name = name; field.value = value; form.appendChild(field);
     }
@@ -398,13 +413,13 @@ export function TikTokStatsApp() {
           <div className="aggregate-item"><span>总分享</span><strong title={String(summary.totals.shares)}>{formatMetric(summary.totals.shares)}</strong></div>
         </div>
         <div className="table-wrap">
-          <table><thead><tr><th>#</th><th>状态</th><th>失败原因</th><th>内容</th><th>发布时间</th><th>播放量</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>抓取时间</th><th>链接</th></tr></thead>
+          <table><thead><tr><th>#</th><th>状态</th><th>失败原因</th><th>内容</th>{sortableHeader("发布时间", "publishedAt")}{sortableHeader("播放量", "views")}{sortableHeader("点赞", "likes")}{sortableHeader("评论", "comments")}{sortableHeader("收藏", "saves")}{sortableHeader("分享", "shares")}{sortableHeader("抓取时间", "fetchedAt")}<th>链接</th></tr></thead>
             <tbody>{visibleResults.length ? visibleResults.map((item, index) => (
-              <tr key={item.key}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span></td><td className="reason-cell" title={item.error}>{item.status === "error" ? item.error : "—"}</td><td className="video-cell"><strong>{item.author ? `@${item.author}` : `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.description || "等待获取内容信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">打开</a></td></tr>
+              <tr key={item.key}><td>{(page - 1) * pageSize + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span></td><td className="reason-cell" title={item.error}>{item.status === "error" ? item.error : "—"}</td><td className="video-cell"><strong>{item.author ? `@${item.author}` : `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.description || "等待获取内容信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">打开</a></td></tr>
             )) : <tr><td className="empty-row" colSpan={12}>{mode === "profile" ? "账号内容会在扫描后显示在这里" : "结果会在这里逐条出现"}</td></tr>}</tbody>
           </table>
         </div>
-        <div className="pager"><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div>
+        <div className="pager"><label className="page-size" htmlFor="page-size"><span>每页显示</span><select id="page-size" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 50 | 100 | 200); setPage(1); }}><option value={50}>50 条</option><option value={100}>100 条</option><option value={200}>200 条</option></select></label><div className="pager-nav"><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div></div>
       </section>
       <footer className="footer"><span>仅处理 TikTok 公开内容；私密、删除或地区受限内容无法获取。</span><span>数据为每次查询时 TikTok 返回的公开快照。</span></footer>
     </main>
