@@ -17,3 +17,60 @@ test("renders the finished TikTok data tool", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
 });
+
+test("normalizes one public profile page with complete metrics", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalCode = process.env.ACCESS_CODE;
+  process.env.ACCESS_CODE = "profile-test";
+  const hydration = {
+    __DEFAULT_SCOPE__: {
+      "webapp.user-detail": {
+        statusCode: 0,
+        userInfo: {
+          user: { uniqueId: "demo_creator", nickname: "Demo", secUid: "MS4wLjABAAAA_demo_profile_identifier_123456789", privateAccount: false },
+          stats: { followerCount: 1234, videoCount: 9 },
+        },
+      },
+    },
+  };
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://www.tiktok.com/@demo_creator")) {
+      return new Response(`<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(hydration)}</script>`);
+    }
+    if (url.startsWith("https://www.tiktok.com/api/creator/item_list/")) {
+      return Response.json({
+        statusCode: 0,
+        hasMorePrevious: true,
+        itemList: [
+          { id: "7673556768491883808", createTime: 1786648761, desc: "First", author: { uniqueId: "demo_creator" }, statsV2: { playCount: "710", diggCount: "32", commentCount: "2", collectCount: "3", shareCount: "0" } },
+          { id: "7672457680946089249", createTime: 1786383260, desc: "Second", author: { uniqueId: "demo_creator" }, statsV2: { playCount: "423", diggCount: "19", commentCount: "1", shareCount: "1" } },
+        ],
+      });
+    }
+    throw new Error(`Unexpected upstream request: ${url}`);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("profile-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(new Request("http://localhost/api/profile", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-access-code": "profile-test" },
+      body: JSON.stringify({ username: "@demo_creator", cursor: 1788310000000 }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.profile.username, "demo_creator");
+    assert.equal(data.items.length, 2);
+    assert.deepEqual({ views: data.items[0].views, likes: data.items[0].likes, comments: data.items[0].comments, saves: data.items[0].saves, shares: data.items[0].shares }, { views: 710, likes: 32, comments: 2, saves: 3, shares: 0 });
+    assert.equal(data.items[1].saves, null);
+    assert.equal(data.nextCursor, 1786383260000);
+    assert.equal(data.hasMore, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCode === undefined) delete process.env.ACCESS_CODE;
+    else process.env.ACCESS_CODE = originalCode;
+  }
+});
