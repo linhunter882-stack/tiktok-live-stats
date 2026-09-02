@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { collectAccounts } from "./account-input";
 import { beijingDate, beijingMonth, selectedRange, type RangeMode } from "./date-range";
 import { sortResults, type SortDirection, type SortKey } from "./result-sort";
 
@@ -22,6 +23,7 @@ type Result = Metrics & {
 };
 type ProfileResult = Result & { createdAt: number };
 type ProfileInfo = { username: string; nickname: string; followerCount: number | null; videoCount: number | null };
+type ProfileBatch = { total: number; done: number; success: number; failed: number; current: string };
 type ProfilePage = {
   profile?: ProfileInfo;
   secUid: string;
@@ -104,6 +106,8 @@ export function TikTokStatsApp() {
   const [customEnd, setCustomEnd] = useState(beijingDate);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo | null>(null);
   const [profileProgress, setProfileProgress] = useState({ pages: 0, scanned: 0 });
+  const [profileBatch, setProfileBatch] = useState<ProfileBatch>({ total: 0, done: 0, success: 0, failed: 0, current: "" });
+  const [profileErrors, setProfileErrors] = useState<string[]>([]);
   const [activeRangeLabel, setActiveRangeLabel] = useState("");
   const [taskError, setTaskError] = useState("");
   const [results, setResults] = useState<Result[]>([]);
@@ -117,6 +121,7 @@ export function TikTokStatsApp() {
   const fileInput = useRef<HTMLInputElement>(null);
   const cancelledRef = useRef(false);
   const parsed = useMemo(() => collectLinks(input), [input]);
+  const parsedAccounts = useMemo(() => collectAccounts(profileInput), [profileInput]);
 
   useEffect(() => {
     const saved = sessionStorage.getItem("tt-access-code");
@@ -144,9 +149,12 @@ export function TikTokStatsApp() {
   const pages = Math.max(1, Math.ceil(results.length / pageSize));
   const visibleResults = sortedResults.slice((page - 1) * pageSize, page * pageSize);
   const draftRangeLabel = rangeMode === "sevenDays" ? "近 7 天" : rangeMode === "month" ? month : customStart === customEnd ? `${customStart}（单日）` : `${customStart} 至 ${customEnd}`;
-  const taskFinished = mode === "profile" ? profileInfo !== null : summary.total > 0 && summary.done === summary.total;
-  const taskTone = taskError ? "error" : running ? "running" : cancelled ? "warning" : taskFinished ? "success" : "idle";
-  const taskLabel = running ? (mode === "profile" ? "扫描中" : "处理中") : taskError ? "查询失败" : cancelled ? "已停止" : taskFinished ? "已完成" : "等待开始";
+  const taskFinished = mode === "profile" ? profileBatch.total > 0 && profileBatch.done === profileBatch.total : summary.total > 0 && summary.done === summary.total;
+  const profilePercent = profileBatch.total ? Math.round(profileBatch.done / profileBatch.total * 100) : 0;
+  const profileHasFailures = mode === "profile" && taskFinished && profileBatch.failed > 0;
+  const taskTone = taskError ? "error" : running ? "running" : cancelled || profileHasFailures ? "warning" : taskFinished ? "success" : "idle";
+  const taskLabel = running ? (mode === "profile" ? "扫描中" : "处理中") : taskError ? "查询失败" : cancelled ? "已停止" : profileHasFailures ? (profileBatch.success ? "部分失败" : "全部失败") : taskFinished ? "已完成" : "等待开始";
+  const profileScope = profileBatch.total > 1 ? `${profileBatch.success} 个账号` : profileInfo ? `@${profileInfo.username}` : "";
 
   function changeSort(key: SortKey) {
     setSortDirection(sortKey === key && sortDirection === "desc" ? "asc" : "desc");
@@ -163,6 +171,7 @@ export function TikTokStatsApp() {
     if (running || next === mode) return;
     setMode(next); setResults([]); setPage(1); setCancelled(false); setTaskError("");
     setProfileInfo(null); setProfileProgress({ pages: 0, scanned: 0 }); setActiveRangeLabel("");
+    setProfileBatch({ total: 0, done: 0, success: 0, failed: 0, current: "" }); setProfileErrors([]);
   }
 
   async function verify(code = accessCode, showError = true) {
@@ -222,46 +231,77 @@ export function TikTokStatsApp() {
   }
 
   async function startProfile() {
-    if (!profileInput.trim() || running) return;
+    if (running) return;
+    if (!parsedAccounts.accounts.length) { setTaskError("请输入至少一个有效的 TikTok 账号"); return; }
     let range: ReturnType<typeof selectedRange>;
     try { range = selectedRange(rangeMode, month, customStart, customEnd); }
     catch (error) { setTaskError(error instanceof Error ? error.message : "时间范围不正确"); return; }
 
     cancelledRef.current = false; setCancelled(false); setRunning(true); setTaskError("");
     setResults([]); setPage(1); setProfileInfo(null); setProfileProgress({ pages: 0, scanned: 0 });
-    setActiveRangeLabel(range.label);
+    setProfileErrors([]); setActiveRangeLabel(range.label);
+    setProfileBatch({ total: parsedAccounts.accounts.length, done: 0, success: 0, failed: 0, current: parsedAccounts.accounts[0] });
     const seenIds = new Set<string>();
-    const seenCursors = new Set<number>();
-    let cursor = range.end * 1000;
-    let secUid = "";
-    let deviceId = "";
+    const errors: string[] = [];
+    let totalPages = 0;
+    let totalScanned = 0;
+    let done = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let firstProfile: ProfileInfo | null = null;
 
     try {
-      for (let pageNumber = 1; pageNumber <= 100 && !cancelledRef.current; pageNumber += 1) {
-        if (seenCursors.has(cursor)) throw new Error("TikTok 分页游标停滞，请重新查询");
-        seenCursors.add(cursor);
-        const response = await fetch("/api/profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-access-code": accessCode },
-          body: JSON.stringify({ username: secUid ? undefined : profileInput, secUid: secUid || undefined, cursor, deviceId: deviceId || undefined }),
-        });
-        const data = await response.json() as ProfilePage;
-        if (response.status === 401) { setAuthorized(false); sessionStorage.removeItem("tt-access-code"); throw new Error("访问口令已失效，请重新输入"); }
-        if (!response.ok) throw new Error(data.error || "账号数据获取失败");
-        secUid = data.secUid; deviceId = data.deviceId;
-        if (data.profile) setProfileInfo(data.profile);
-        const matched = data.items.filter((item) => item.createdAt >= range.start && item.createdAt < range.end && !seenIds.has(item.key));
-        matched.forEach((item) => seenIds.add(item.key));
-        if (matched.length) setResults((current) => [...current, ...matched].sort((a, b) => (Number((b as ProfileResult).createdAt) || 0) - (Number((a as ProfileResult).createdAt) || 0)));
-        setProfileProgress((current) => ({ pages: pageNumber, scanned: current.scanned + data.items.length }));
-        if (!data.hasMore || data.nextCursor <= range.start * 1000) break;
-        if (!Number.isFinite(data.nextCursor) || data.nextCursor >= cursor) throw new Error("TikTok 分页未向前推进，请重新查询");
-        cursor = data.nextCursor;
+      for (const account of parsedAccounts.accounts) {
+        if (cancelledRef.current) break;
+        setProfileBatch({ total: parsedAccounts.accounts.length, done, success: succeeded, failed, current: account });
+        const seenCursors = new Set<number>();
+        let cursor = range.end * 1000;
+        let secUid = "";
+        let deviceId = "";
+        let accountFinished = false;
+        let accountSucceeded = false;
+        let stopAll = false;
+
+        try {
+          for (let pageNumber = 1; pageNumber <= 100 && !cancelledRef.current; pageNumber += 1) {
+            if (seenCursors.has(cursor)) throw new Error("TikTok 分页游标停滞，请重新查询");
+            seenCursors.add(cursor);
+            const response = await fetch("/api/profile", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-access-code": accessCode },
+              body: JSON.stringify({ username: secUid ? undefined : account, secUid: secUid || undefined, cursor, deviceId: deviceId || undefined }),
+            });
+            const data = await response.json() as ProfilePage;
+            if (response.status === 401) { setAuthorized(false); sessionStorage.removeItem("tt-access-code"); stopAll = true; throw new Error("访问口令已失效，请重新输入"); }
+            if (!response.ok) throw new Error(data.error || "账号数据获取失败");
+            secUid = data.secUid; deviceId = data.deviceId;
+            if (data.profile && !firstProfile) { firstProfile = data.profile; setProfileInfo(data.profile); }
+            const matched = data.items.filter((item) => item.createdAt >= range.start && item.createdAt < range.end && !seenIds.has(item.key));
+            matched.forEach((item) => seenIds.add(item.key));
+            if (matched.length) setResults((current) => [...current, ...matched].sort((a, b) => (Number((b as ProfileResult).createdAt) || 0) - (Number((a as ProfileResult).createdAt) || 0)));
+            totalPages += 1; totalScanned += data.items.length;
+            setProfileProgress({ pages: totalPages, scanned: totalScanned });
+            if (!data.hasMore || data.nextCursor <= range.start * 1000) { accountFinished = true; break; }
+            if (!Number.isFinite(data.nextCursor) || data.nextCursor >= cursor) throw new Error("TikTok 分页未向前推进，请重新查询");
+            cursor = data.nextCursor;
+          }
+          if (!cancelledRef.current && !accountFinished) throw new Error("该账号内容过多，请缩短查询范围");
+          accountSucceeded = !cancelledRef.current;
+        } catch (error) {
+          const message = friendlyError(error instanceof Error ? error.message : "账号数据获取失败");
+          errors.push(`@${account}：${message}`); setProfileErrors([...errors]);
+          if (stopAll) setTaskError(message);
+        }
+
+        if (cancelledRef.current) break;
+        done += 1;
+        if (accountSucceeded) succeeded += 1; else failed += 1;
+        setProfileBatch({ total: parsedAccounts.accounts.length, done, success: succeeded, failed, current: "" });
+        if (stopAll) break;
       }
-    } catch (error) {
-      if (!cancelledRef.current) setTaskError(friendlyError(error instanceof Error ? error.message : "账号数据获取失败"));
     } finally {
       setRunning(false);
+      setProfileBatch((current) => ({ ...current, current: "" }));
     }
   }
 
@@ -352,7 +392,7 @@ export function TikTokStatsApp() {
           </> : <>
             <h2 className="sr-only">查询账号公开视频</h2>
             <div className={`profile-form ${rangeMode === "custom" ? "profile-form-custom" : rangeMode === "sevenDays" ? "profile-form-quick" : ""}`}>
-              <div className="field"><label htmlFor="profile-input">TikTok 账号</label><div className="field-control"><input id="profile-input" type="text" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder="@_vanybunny_ 或主页链接" />{profileInput && <button className="input-clear" type="button" aria-label="清空 TikTok 账号" disabled={running} onClick={() => setProfileInput("")}>×</button>}</div></div>
+              <div className="field"><div className="field-label-row"><label htmlFor="profile-input">TikTok 账号</label><span>{formatNumber(parsedAccounts.accounts.length)} 个</span></div><div className="field-control"><textarea id="profile-input" className="account-textarea" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder={"@lacebabe_lingerie\n@_vanybunny_\nhttps://www.tiktok.com/@creator"} />{profileInput && <button className="input-clear input-clear-top" type="button" aria-label="清空 TikTok 账号" disabled={running} onClick={() => setProfileInput("")}>×</button>}</div></div>
               <fieldset className="range-field"><legend>时间范围</legend><div className="range-options">
                 <label><input type="radio" name="range" value="sevenDays" checked={rangeMode === "sevenDays"} disabled={running} onChange={() => setRangeMode("sevenDays")} />近 7 天</label>
                 <label><input type="radio" name="range" value="month" checked={rangeMode === "month"} disabled={running} onChange={() => setRangeMode("month")} />整月</label>
@@ -363,9 +403,9 @@ export function TikTokStatsApp() {
               {rangeMode === "custom" && <div className="custom-date-fields"><label className="field" htmlFor="profile-start-date"><span>开始日期</span><input id="profile-start-date" type="date" value={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => { const value = event.target.value; setCustomStart(value); if (customEnd && value > customEnd) setCustomEnd(value); }} /></label><label className="field" htmlFor="profile-end-date"><span>结束日期（包含当天）</span><input id="profile-end-date" type="date" value={customEnd} min={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => setCustomEnd(event.target.value)} /></label></div>}
             </div>
             <div className="actions profile-actions">
-              <div className="action-group"><button className="btn btn-primary" type="button" disabled={!profileInput.trim() || running} onClick={() => void startProfile()}>{running ? "正在查询…" : "查询账号数据"}</button>{running && <button className="btn btn-secondary" type="button" onClick={stop}>停止查询</button>}</div>
+              <div className="action-group"><button className="btn btn-primary" type="button" disabled={!parsedAccounts.accounts.length || running} onClick={() => void startProfile()}>{running ? "正在查询…" : `查询 ${formatNumber(parsedAccounts.accounts.length)} 个账号`}</button>{running && <button className="btn btn-secondary" type="button" onClick={stop}>停止查询</button>}</div>
             </div>
-            <p id="profile-range-note" className="inline-note"><strong>自定义范围支持单日查询，最长连续 3 个月</strong>；统计的是该期间发布内容当前的累计数据。</p>
+            <p id="profile-range-note" className="inline-note"><strong>一行一个账号，系统会逐个排队</strong>{parsedAccounts.invalid ? `；已忽略 ${formatNumber(parsedAccounts.invalid)} 个无法识别项` : ""}。自定义范围支持单日查询，最长连续 3 个月。</p>
           </>}
         </div>
 
@@ -385,18 +425,18 @@ export function TikTokStatsApp() {
             <div className="summary">
               <div className="stat"><span className="stat-label">匹配内容</span><strong>{formatNumber(summary.success)}</strong></div>
               <div className="stat"><span className="stat-label">已扫描</span><strong>{formatNumber(profileProgress.scanned)}</strong></div>
-              <div className="stat"><span className="stat-label">已翻页</span><strong>{formatNumber(profileProgress.pages)}</strong></div>
+              <div className="stat stat-text"><span className="stat-label">账号进度</span><strong>{formatNumber(profileBatch.done)} / {formatNumber(profileBatch.total)}</strong></div>
               <div className="stat stat-text"><span className="stat-label">查询范围</span><strong>{activeRangeLabel || draftRangeLabel}</strong></div>
             </div>
-            <div className="progress-wrap"><div className="progress-meta"><span>账号扫描</span><span>{running ? "进行中" : profileInfo ? "完成" : "等待"}</span></div><div className="progress" role="progressbar" aria-label="账号扫描进度" aria-valuetext={running ? "正在扫描" : "扫描结束"}><div className={`progress-bar ${running ? "progress-scanning" : ""}`} style={{ width: running ? "58%" : profileInfo ? "100%" : "0%" }} /></div></div>
-            <div className="task-message" aria-live="polite">{taskError ? <span className="task-error" role="alert">{taskError}</span> : running ? `正在扫描${profileInfo?.username ? ` @${profileInfo.username}` : "账号"}，已查看 ${formatNumber(profileProgress.scanned)} 条。` : cancelled ? "查询已停止，当前结果可以继续查看或导出。" : profileInfo ? `@${profileInfo.username} 在${activeRangeLabel}内共有 ${formatNumber(summary.success)} 条公开内容。` : "输入账号和时间范围后开始查询。"}</div>
-            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !profileInput.trim()} onClick={() => void startProfile()}>重新查询</button></div>
+            <div className="progress-wrap"><div className="progress-meta"><span>账号扫描</span><span>{running ? "进行中" : taskFinished ? "完成" : "等待"}</span></div><div className="progress" role="progressbar" aria-label="账号扫描进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={profilePercent}><div className="progress-bar" style={{ width: `${profilePercent}%` }} /></div></div>
+            <div className="task-message" aria-live="polite">{taskError ? <span className="task-error" role="alert">{taskError}</span> : running ? `正在查询 @${profileBatch.current || "账号"}，已完成 ${formatNumber(profileBatch.done)} / ${formatNumber(profileBatch.total)} 个账号。` : cancelled ? "查询已停止，当前结果可以继续查看或导出。" : profileErrors.length ? <span className="task-warning" title={profileErrors.join("\n")}>{profileBatch.failed} 个账号失败：{profileErrors.slice(0, 2).join("；")}{profileErrors.length > 2 ? "…" : ""}</span> : taskFinished ? `已完成 ${formatNumber(profileBatch.success)} 个账号，共匹配 ${formatNumber(summary.success)} 条公开内容。` : "输入账号和时间范围后开始查询。"}</div>
+            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !parsedAccounts.accounts.length} onClick={() => void startProfile()}>重新查询</button></div>
           </>}
         </aside>
       </section>
 
       <section className="card results" aria-labelledby="results-title">
-        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileInfo ? `@${profileInfo.username} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-actions"><span className="results-meta">{mode === "profile" ? "以下为查询时的累计公开数据" : "合计仅包含成功结果"}</span><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div></div>
+        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileScope ? `${profileScope} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-actions"><span className="results-meta">{mode === "profile" ? "以下为查询时的累计公开数据" : "合计仅包含成功结果"}</span><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div></div>
         <div className="aggregate" aria-label="成功结果数据合计">
           <div className="aggregate-item"><span>总播放量</span><strong title={String(summary.totals.views)}>{formatMetric(summary.totals.views)}</strong></div>
           <div className="aggregate-item"><span>总点赞</span><strong title={String(summary.totals.likes)}>{formatMetric(summary.totals.likes)}</strong></div>

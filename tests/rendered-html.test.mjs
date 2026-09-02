@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { collectAccounts } from "../app/account-input.ts";
 import { selectedRange } from "../app/date-range.ts";
 import { sortResults } from "../app/result-sort.ts";
 
@@ -106,4 +107,10 @@ test("accepts a single Beijing day and caps custom ranges at three months", () =
   assert.doesNotThrow(() => selectedRange("custom", "", "2026-06-01", "2026-08-31"));
   assert.throws(() => selectedRange("custom", "", "2026-06-01", "2026-09-01"), /最长为 3 个月/);
   assert.throws(() => selectedRange("custom", "", "2026-08-14", "2026-08-13"), /不能早于/);
+});
+
+test("normalizes and deduplicates multiple TikTok accounts", () => {
+  const parsed = collectAccounts("@Alice, alice\nhttps://www.tiktok.com/@bob/video/1234567890123456789；bad!name");
+  assert.deepEqual(parsed.accounts, ["Alice", "bob"]);
+  assert.equal(parsed.invalid, 1);
 });
