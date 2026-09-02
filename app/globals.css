@@ -87,8 +87,6 @@ textarea::placeholder { color: #98a2b3; }
 .custom-date-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .field { display: grid; gap: 7px; min-width: 0; }
 .field > span, .field > label, .range-field legend { color: var(--ink); font-size: .8rem; font-weight: 750; }
-.field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink); font-size: .8rem; font-weight: 750; }
-.field-label-row > span { color: var(--muted); font-size: .75rem; font-weight: 650; }
 .field-control { position: relative; }
 .field input {
   width: 100%; min-height: 46px; border: 1px solid #d7dce3; border-radius: 7px; padding: 0 12px;
@@ -193,9 +191,10 @@ tbody tr:hover { background: #fafbfc; }
 .link { color: var(--link); font-weight: 700; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .empty-row { text-align: center !important; color: var(--muted); padding: 42px; }
-.pager { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 22px 18px; padding: 11px 12px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; background: #fff; }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin: 0 22px 18px; padding: 11px 12px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; background: #fff; }
 .pager span { color: var(--muted); font-size: .82rem; }
 .page-size, .pager-nav { display: flex; align-items: center; gap: 10px; }
+.pager-nav { justify-content: flex-end; flex-wrap: wrap; }
 .page-size { gap: 4px; }
 .page-size > span { margin-right: 6px; }
 .page-size-button { min-width: 42px; min-height: 38px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px; color: #475467; background: transparent; font-size: .8rem; }
@@ -246,7 +245,7 @@ tbody tr:hover { background: #fafbfc; }
   .aggregate-item:last-child { grid-column: span 2; border-right: 0; border-bottom: 0; }
   .table-wrap { margin-inline: 14px; }
   .pager { margin: 0 14px 14px; }
-  .pager { align-items: flex-start; flex-direction: column; }
+  .pager { align-items: flex-end; }
   .pager-nav { width: 100%; justify-content: flex-end; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -390,9 +390,9 @@ export function TikTokStatsApp() {
             </div>
             <p className="inline-note"><strong>已识别 {formatNumber(parsed.links.length)} 条 TikTok 内容</strong>{parsed.ignored ? `，忽略 ${formatNumber(parsed.ignored)} 个其他平台链接` : ""}。支持批量链接，系统会自动排队处理；处理期间请保持页面打开。</p>
           </> : <>
-            <h2 className="sr-only">查询账号公开视频</h2>
+            <div className="input-head profile-input-head"><div><h2>添加 TikTok 账号</h2><p className="helper">每行输入一个账号（或账号链接），也支持空格、逗号隔开</p></div><span className="count-pill">{formatNumber(parsedAccounts.accounts.length)} 个</span></div>
             <div className={`profile-form ${rangeMode === "custom" ? "profile-form-custom" : rangeMode === "sevenDays" ? "profile-form-quick" : ""}`}>
-              <div className="field"><div className="field-label-row"><label htmlFor="profile-input">TikTok 账号</label><span>{formatNumber(parsedAccounts.accounts.length)} 个</span></div><div className="field-control"><textarea id="profile-input" className="account-textarea" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder={"@lacebabe_lingerie\n@_vanybunny_\nhttps://www.tiktok.com/@creator"} />{profileInput && <button className="input-clear input-clear-top" type="button" aria-label="清空 TikTok 账号" disabled={running} onClick={() => setProfileInput("")}>×</button>}</div></div>
+              <div className="field"><label htmlFor="profile-input">TikTok 账号</label><div className="field-control"><textarea id="profile-input" className="account-textarea" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder={"@lacebabe_lingerie\n@_vanybunny_\nhttps://www.tiktok.com/@creator"} />{profileInput && <button className="input-clear input-clear-top" type="button" aria-label="清空 TikTok 账号" disabled={running} onClick={() => setProfileInput("")}>×</button>}</div></div>
               <fieldset className="range-field"><legend>时间范围</legend><div className="range-options">
                 <label><input type="radio" name="range" value="sevenDays" checked={rangeMode === "sevenDays"} disabled={running} onChange={() => setRangeMode("sevenDays")} />近 7 天</label>
                 <label><input type="radio" name="range" value="month" checked={rangeMode === "month"} disabled={running} onChange={() => setRangeMode("month")} />整月</label>
@@ -425,7 +425,7 @@ export function TikTokStatsApp() {
             <div className="summary">
               <div className="stat"><span className="stat-label">匹配内容</span><strong>{formatNumber(summary.success)}</strong></div>
               <div className="stat"><span className="stat-label">已扫描</span><strong>{formatNumber(profileProgress.scanned)}</strong></div>
-              <div className="stat stat-text"><span className="stat-label">账号进度</span><strong>{formatNumber(profileBatch.done)} / {formatNumber(profileBatch.total)}</strong></div>
+              <div className="stat stat-text"><span className="stat-label">账号进度</span><strong>{formatNumber(profileBatch.done)} / {formatNumber(profileBatch.total || parsedAccounts.accounts.length)}</strong></div>
               <div className="stat stat-text"><span className="stat-label">查询范围</span><strong>{activeRangeLabel || draftRangeLabel}</strong></div>
             </div>
             <div className="progress-wrap"><div className="progress-meta"><span>账号扫描</span><span>{running ? "进行中" : taskFinished ? "完成" : "等待"}</span></div><div className="progress" role="progressbar" aria-label="账号扫描进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={profilePercent}><div className="progress-bar" style={{ width: `${profilePercent}%` }} /></div></div>
@@ -451,7 +451,7 @@ export function TikTokStatsApp() {
             )) : <tr><td className="empty-row" colSpan={mode === "profile" ? 9 : 12}>{mode === "profile" ? "账号内容会在扫描后显示在这里" : "结果会在这里逐条出现"}</td></tr>}</tbody>
           </table>
         </div>
-        <div className="pager"><div className="page-size" role="group" aria-label="每页显示条数"><span>每页显示</span>{([50, 100, 200] as const).map((size) => <button key={size} className={`page-size-button ${pageSize === size ? "active" : ""}`} type="button" aria-pressed={pageSize === size} onClick={() => { setPageSize(size); setPage(1); }}>{size}</button>)}</div><div className="pager-nav"><span>共 {formatNumber(summary.total)} 条</span><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div></div>
+        <div className="pager"><div className="pager-nav"><div className="page-size" role="group" aria-label="每页显示条数"><span>每页显示</span>{([50, 100, 200] as const).map((size) => <button key={size} className={`page-size-button ${pageSize === size ? "active" : ""}`} type="button" aria-pressed={pageSize === size} onClick={() => { setPageSize(size); setPage(1); }}>{size}</button>)}</div><span>共 {formatNumber(summary.total)} 条</span><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div></div>
       </section>
       <footer className="footer"><span>仅处理 TikTok 公开内容；私密、删除或地区受限内容无法获取。</span><span>数据为每次查询时 TikTok 返回的公开快照。</span></footer>
     </main>
