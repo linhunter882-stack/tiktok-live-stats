@@ -23,9 +23,11 @@ type Result = Metrics & {
 };
 type ProfileResult = Result & { createdAt: number };
 type ProfileInfo = { username: string; nickname: string; followerCount: number | null; videoCount: number | null };
+type FollowerGrowth = { username: string; current: number; ready: boolean; startCount: number | null; endCount: number | null; netGrowth: number | null; growthRate: number | null; startObservedAt: string | null; endObservedAt: string | null; trackedSince: string | null };
 type ProfileBatch = { total: number; done: number; success: number; failed: number; current: string };
 type ProfilePage = {
   profile?: ProfileInfo;
+  followerGrowth?: FollowerGrowth | null;
   secUid: string;
   deviceId: string;
   cursor: number;
@@ -81,6 +83,10 @@ function formatMetric(value: number | null) {
   return value === null ? "—" : formatNumber(value);
 }
 
+function formatSignedMetric(value: number | null) {
+  return value === null ? "待积累" : `${value > 0 ? "+" : ""}${formatNumber(value)}`;
+}
+
 function friendlyError(message: string) {
   const value = message.toLowerCase();
   if (value.includes("item doesn't exist") || value.includes("not found")) return "内容不存在或已下架";
@@ -105,6 +111,7 @@ export function TikTokStatsApp() {
   const [customStart, setCustomStart] = useState(beijingDate);
   const [customEnd, setCustomEnd] = useState(beijingDate);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo | null>(null);
+  const [followerGrowths, setFollowerGrowths] = useState<FollowerGrowth[]>([]);
   const [profileProgress, setProfileProgress] = useState({ pages: 0, scanned: 0 });
   const [profileBatch, setProfileBatch] = useState<ProfileBatch>({ total: 0, done: 0, success: 0, failed: 0, current: "" });
   const [profileErrors, setProfileErrors] = useState<string[]>([]);
@@ -145,6 +152,10 @@ export function TikTokStatsApp() {
   }, [results]);
 
   const percent = summary.total ? Math.round(summary.done / summary.total * 100) : 0;
+  const followerGrowthSummary = useMemo(() => {
+    const ready = followerGrowths.filter((item) => item.ready && item.netGrowth !== null);
+    return { netGrowth: ready.length ? ready.reduce((sum, item) => sum + (item.netGrowth ?? 0), 0) : null, ready: ready.length, tracked: followerGrowths.length };
+  }, [followerGrowths]);
   const sortedResults = useMemo(() => sortResults(results, sortKey, sortDirection), [results, sortKey, sortDirection]);
   const pages = Math.max(1, Math.ceil(results.length / pageSize));
   const visibleResults = sortedResults.slice((page - 1) * pageSize, page * pageSize);
@@ -170,7 +181,7 @@ export function TikTokStatsApp() {
   function changeMode(next: Mode) {
     if (running || next === mode) return;
     setMode(next); setResults([]); setPage(1); setCancelled(false); setTaskError("");
-    setProfileInfo(null); setProfileProgress({ pages: 0, scanned: 0 }); setActiveRangeLabel("");
+    setProfileInfo(null); setFollowerGrowths([]); setProfileProgress({ pages: 0, scanned: 0 }); setActiveRangeLabel("");
     setProfileBatch({ total: 0, done: 0, success: 0, failed: 0, current: "" }); setProfileErrors([]);
   }
 
@@ -238,7 +249,7 @@ export function TikTokStatsApp() {
     catch (error) { setTaskError(error instanceof Error ? error.message : "时间范围不正确"); return; }
 
     cancelledRef.current = false; setCancelled(false); setRunning(true); setTaskError("");
-    setResults([]); setPage(1); setProfileInfo(null); setProfileProgress({ pages: 0, scanned: 0 });
+    setResults([]); setPage(1); setProfileInfo(null); setFollowerGrowths([]); setProfileProgress({ pages: 0, scanned: 0 });
     setProfileErrors([]); setActiveRangeLabel(range.label);
     setProfileBatch({ total: parsedAccounts.accounts.length, done: 0, success: 0, failed: 0, current: parsedAccounts.accounts[0] });
     const seenIds = new Set<string>();
@@ -269,13 +280,14 @@ export function TikTokStatsApp() {
             const response = await fetch("/api/profile", {
               method: "POST",
               headers: { "Content-Type": "application/json", "x-access-code": accessCode },
-              body: JSON.stringify({ username: secUid ? undefined : account, secUid: secUid || undefined, cursor, deviceId: deviceId || undefined }),
+              body: JSON.stringify({ username: secUid ? undefined : account, secUid: secUid || undefined, cursor, deviceId: deviceId || undefined, rangeStart: range.start, rangeEnd: range.end }),
             });
             const data = await response.json() as ProfilePage;
             if (response.status === 401) { setAuthorized(false); sessionStorage.removeItem("tt-access-code"); stopAll = true; throw new Error("访问口令已失效，请重新输入"); }
             if (!response.ok) throw new Error(data.error || "账号数据获取失败");
             secUid = data.secUid; deviceId = data.deviceId;
             if (data.profile && !firstProfile) { firstProfile = data.profile; setProfileInfo(data.profile); }
+            if (data.followerGrowth) setFollowerGrowths((current) => [...current.filter((item) => item.username.toLowerCase() !== data.followerGrowth!.username.toLowerCase()), data.followerGrowth!]);
             const matched = data.items.filter((item) => item.createdAt >= range.start && item.createdAt < range.end && !seenIds.has(item.key));
             matched.forEach((item) => seenIds.add(item.key));
             if (matched.length) setResults((current) => [...current, ...matched].sort((a, b) => (Number((b as ProfileResult).createdAt) || 0) - (Number((a as ProfileResult).createdAt) || 0)));
@@ -436,13 +448,14 @@ export function TikTokStatsApp() {
       </section>
 
       <section className="card results" aria-labelledby="results-title">
-        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileScope ? `${profileScope} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-actions"><span className="results-meta">{mode === "profile" ? "以下为查询时的累计公开数据" : "合计仅包含成功结果"}</span><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div></div>
-        <div className="aggregate" aria-label="成功结果数据合计">
+        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileScope ? `${profileScope} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-actions"><span className="results-meta">{mode === "profile" ? "视频为查询时数据；涨粉来自历史快照" : "合计仅包含成功结果"}</span><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div></div>
+        <div className={`aggregate ${mode === "profile" ? "aggregate-profile" : ""}`} aria-label={mode === "profile" ? "账号内容与粉丝增长合计" : "成功结果数据合计"}>
           <div className="aggregate-item"><span>总播放量</span><strong title={String(summary.totals.views)}>{formatMetric(summary.totals.views)}</strong></div>
           <div className="aggregate-item"><span>总点赞</span><strong title={String(summary.totals.likes)}>{formatMetric(summary.totals.likes)}</strong></div>
           <div className="aggregate-item"><span>总评论</span><strong title={String(summary.totals.comments)}>{formatMetric(summary.totals.comments)}</strong></div>
           <div className="aggregate-item"><span>总收藏</span><strong title={String(summary.totals.saves)}>{formatMetric(summary.totals.saves)}</strong></div>
           <div className="aggregate-item"><span>总分享</span><strong title={String(summary.totals.shares)}>{formatMetric(summary.totals.shares)}</strong></div>
+          {mode === "profile" && <div className="aggregate-item follower-growth" aria-live="polite"><span>净增粉</span><strong className={followerGrowthSummary.netGrowth === null ? "" : followerGrowthSummary.netGrowth >= 0 ? "growth-positive" : "growth-negative"}>{formatSignedMetric(followerGrowthSummary.netGrowth)}</strong><small>{followerGrowthSummary.ready ? `覆盖 ${formatNumber(followerGrowthSummary.ready)} / ${formatNumber(profileBatch.success || followerGrowthSummary.tracked)} 个账号` : followerGrowthSummary.tracked ? "已保存首次快照，后续自动计算" : "查询后开始记录粉丝快照"}</small></div>}
         </div>
         <div className="table-wrap">
           <table className={mode === "profile" ? "profile-table" : "link-table"}><thead><tr>{mode === "links" && <><th>#</th><th>状态</th><th>失败原因</th></>}<th>内容</th>{sortableHeader("发布时间", "publishedAt")}{sortableHeader("播放量", "views")}{sortableHeader("点赞", "likes")}{sortableHeader("评论", "comments")}{sortableHeader("收藏", "saves")}{sortableHeader("分享", "shares")}{sortableHeader("抓取时间", "fetchedAt")}<th>链接</th></tr></thead>

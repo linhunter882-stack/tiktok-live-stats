@@ -13,6 +13,16 @@
       "custom_domain": true
     }
   ],
+  "triggers": {
+    "crons": ["17 */6 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tiktok-data-history",
+      "database_id": "7ce0f601-c12d-4c90-b224-6e845777042e"
+    }
+  ],
   "assets": {
     "directory": "dist/client",
     "not_found_handling": "none",

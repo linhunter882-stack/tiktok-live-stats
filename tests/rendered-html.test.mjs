@@ -44,6 +44,30 @@ test("normalizes one public profile page with complete metrics", async () => {
       },
     },
   };
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const snapshots = [{ username: "demo_creator", observed_at: (nowSeconds - 6 * 86_400) * 1000, follower_count: 1000 }];
+  const fakeDb = {
+    prepare(sql) {
+      return {
+        bind(...params) {
+          return {
+            async run() {
+              if (sql.startsWith("INSERT")) snapshots.push({ username: params[0], observed_at: params[1], follower_count: params[2] });
+              return {};
+            },
+            async first() {
+              let rows = snapshots.filter((row) => row.username === params[0]);
+              if (sql.includes("observed_at <= ?")) rows = rows.filter((row) => row.observed_at <= params[1]).sort((a, b) => b.observed_at - a.observed_at);
+              else if (sql.includes("observed_at >= ?")) rows = rows.filter((row) => row.observed_at >= params[1] && row.observed_at < params[2]).sort((a, b) => a.observed_at - b.observed_at);
+              else if (sql.includes("observed_at < ?")) rows = rows.filter((row) => row.observed_at < params[1]).sort((a, b) => b.observed_at - a.observed_at);
+              else rows.sort((a, b) => a.observed_at - b.observed_at);
+              return rows[0] ?? null;
+            },
+          };
+        },
+      };
+    },
+  };
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.startsWith("https://www.tiktok.com/@demo_creator")) {
@@ -69,8 +93,8 @@ test("normalizes one public profile page with complete metrics", async () => {
     const response = await worker.fetch(new Request("http://localhost/api/profile", {
       method: "POST",
       headers: { "content-type": "application/json", "x-access-code": "profile-test" },
-      body: JSON.stringify({ username: "@demo_creator", cursor: 1788310000000 }),
-    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+      body: JSON.stringify({ username: "@demo_creator", cursor: 1788310000000, rangeStart: nowSeconds - 7 * 86_400, rangeEnd: nowSeconds + 1 }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) }, DB: fakeDb }, { waitUntil() {}, passThroughOnException() {} });
     assert.equal(response.status, 200);
     const data = await response.json();
     assert.equal(data.profile.username, "demo_creator");
@@ -79,6 +103,7 @@ test("normalizes one public profile page with complete metrics", async () => {
     assert.equal(data.items[1].saves, null);
     assert.equal(data.nextCursor, 1786383260000);
     assert.equal(data.hasMore, true);
+    assert.deepEqual({ ready: data.followerGrowth.ready, startCount: data.followerGrowth.startCount, endCount: data.followerGrowth.endCount, netGrowth: data.followerGrowth.netGrowth }, { ready: true, startCount: 1000, endCount: 1234, netGrowth: 234 });
   } finally {
     globalThis.fetch = originalFetch;
     if (originalCode === undefined) delete process.env.ACCESS_CODE;

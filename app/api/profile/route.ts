@@ -7,6 +7,8 @@ type RequestBody = {
   secUid?: string;
   cursor?: number;
   deviceId?: string;
+  rangeStart?: number;
+  rangeEnd?: number;
 };
 
 type Profile = {
@@ -22,6 +24,8 @@ type Profile = {
   videoCount: number | null;
   url: string;
 };
+
+type SnapshotRow = { observed_at: number; follower_count: number };
 
 const noStore = { "Cache-Control": "no-store" };
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -104,6 +108,14 @@ function validateCursor(value: unknown) {
   if (value === undefined) return Date.now();
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < earliestCursor || value > Date.now() + 86_400_000) {
     throw new ApiError("分页位置格式不正确");
+  }
+  return value;
+}
+
+function validateRange(value: unknown, fallback: number, label: string) {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < earliestCursor / 1000 || value > Math.floor(Date.now() / 1000) + 86_400) {
+    throw new ApiError(`${label}格式不正确`);
   }
   return value;
 }
@@ -248,6 +260,44 @@ function hasMoreValue(value: unknown) {
   return value === true || value === 1 || value === "1";
 }
 
+async function recordFollowerGrowth(profile: Profile, rangeStart: number, rangeEnd: number) {
+  const db = globalThis.__TIKTOK_DATA_DB__;
+  if (!db || profile.followerCount === null) return null;
+
+  try {
+    const username = profile.username.toLowerCase();
+    const observedAt = Date.now();
+    await db.prepare("INSERT OR IGNORE INTO follower_snapshots (username, observed_at, follower_count) VALUES (?, ?, ?)")
+      .bind(username, observedAt, profile.followerCount).run();
+
+    const startMs = rangeStart * 1000;
+    const endMs = rangeEnd * 1000;
+    const [beforeStart, firstInside, end, tracked] = await Promise.all([
+      db.prepare("SELECT observed_at, follower_count FROM follower_snapshots WHERE username = ? AND observed_at <= ? ORDER BY observed_at DESC LIMIT 1").bind(username, startMs).first<SnapshotRow>(),
+      db.prepare("SELECT observed_at, follower_count FROM follower_snapshots WHERE username = ? AND observed_at >= ? AND observed_at < ? ORDER BY observed_at ASC LIMIT 1").bind(username, startMs, endMs).first<SnapshotRow>(),
+      db.prepare("SELECT observed_at, follower_count FROM follower_snapshots WHERE username = ? AND observed_at < ? ORDER BY observed_at DESC LIMIT 1").bind(username, endMs).first<SnapshotRow>(),
+      db.prepare("SELECT observed_at, follower_count FROM follower_snapshots WHERE username = ? ORDER BY observed_at ASC LIMIT 1").bind(username).first<SnapshotRow>(),
+    ]);
+    const start = beforeStart ?? firstInside;
+    const ready = Boolean(start && end && end.observed_at > start.observed_at);
+    const netGrowth = ready ? end!.follower_count - start!.follower_count : null;
+    return {
+      username: profile.username,
+      current: profile.followerCount,
+      ready,
+      startCount: start?.follower_count ?? null,
+      endCount: end?.follower_count ?? null,
+      netGrowth,
+      growthRate: ready && start!.follower_count > 0 ? netGrowth! / start!.follower_count * 100 : null,
+      startObservedAt: start ? beijingTime(Math.floor(start.observed_at / 1000)) : null,
+      endObservedAt: end ? beijingTime(Math.floor(end.observed_at / 1000)) : null,
+      trackedSince: tracked ? beijingTime(Math.floor(tracked.observed_at / 1000)) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   if (!matchesAccessCode(request.headers.get("x-access-code") ?? "")) {
     return Response.json({ error: "访问口令不正确" }, { status: 401, headers: noStore });
@@ -273,6 +323,11 @@ export async function POST(request: Request) {
 
     const cursor = validateCursor(body.cursor);
     const deviceId = validateDeviceId(body.deviceId);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const rangeStart = validateRange(body.rangeStart, nowSeconds - 7 * 86_400, "开始时间");
+    const rangeEnd = validateRange(body.rangeEnd, nowSeconds + 1, "结束时间");
+    if (rangeStart >= rangeEnd || rangeEnd - rangeStart > 93 * 86_400) throw new ApiError("粉丝增长查询范围不正确");
+    const followerGrowth = profile ? await recordFollowerGrowth(profile, rangeStart, rangeEnd) : null;
     const referer = username ? `https://www.tiktok.com/@${username}` : "https://www.tiktok.com/";
     const raw = await fetchTikTok(buildFeedUrl(secUid, cursor, deviceId), "application/json, text/plain, */*", referer);
     let data;
@@ -286,7 +341,7 @@ export async function POST(request: Request) {
     // Treat that response as an empty successful page instead of a fetch failure.
     if (!Array.isArray(data?.itemList) && profile?.videoCount === 0 && !hasMoreValue(data?.hasMorePrevious ?? data?.hasMore)) {
       const nextCursor = Math.max(earliestCursor, cursor - 7 * 86_400_000);
-      return Response.json({ profile, secUid, deviceId, cursor, nextCursor, hasMore: false, items: [] }, { headers: noStore });
+      return Response.json({ profile, followerGrowth, secUid, deviceId, cursor, nextCursor, hasMore: false, items: [] }, { headers: noStore });
     }
     if (!Array.isArray(data?.itemList)) throw new ApiError("TikTok 未返回账号视频数据，请稍后重试", 502);
 
@@ -299,7 +354,7 @@ export async function POST(request: Request) {
     nextCursor = Math.max(earliestCursor, nextCursor);
     const hasMore = nextCursor > earliestCursor && hasMoreValue(data.hasMorePrevious ?? data.hasMore);
 
-    return Response.json({ profile, secUid, deviceId, cursor, nextCursor, hasMore, items }, { headers: noStore });
+    return Response.json({ profile, followerGrowth, secUid, deviceId, cursor, nextCursor, hasMore, items }, { headers: noStore });
   } catch (error) {
     if (error instanceof ApiError) return Response.json({ error: error.message }, { status: error.status, headers: noStore });
     const name = error instanceof Error ? error.name : "";
