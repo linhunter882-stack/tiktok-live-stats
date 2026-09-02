@@ -121,6 +121,8 @@ export function TikTokStatsApp() {
   useEffect(() => {
     const saved = sessionStorage.getItem("tt-access-code");
     if (saved) void verify(saved, false);
+    // Restore the saved code only on first mount; later checks are user initiated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const summary = useMemo(() => {
@@ -142,6 +144,9 @@ export function TikTokStatsApp() {
   const pages = Math.max(1, Math.ceil(results.length / pageSize));
   const visibleResults = sortedResults.slice((page - 1) * pageSize, page * pageSize);
   const draftRangeLabel = rangeMode === "sevenDays" ? "近 7 天" : rangeMode === "month" ? month : customStart === customEnd ? `${customStart}（单日）` : `${customStart} 至 ${customEnd}`;
+  const taskFinished = mode === "profile" ? profileInfo !== null : summary.total > 0 && summary.done === summary.total;
+  const taskTone = taskError ? "error" : running ? "running" : cancelled ? "warning" : taskFinished ? "success" : "idle";
+  const taskLabel = running ? (mode === "profile" ? "扫描中" : "处理中") : taskError ? "查询失败" : cancelled ? "已停止" : taskFinished ? "已完成" : "等待开始";
 
   function changeSort(key: SortKey) {
     setSortDirection(sortKey === key && sortDirection === "desc" ? "asc" : "desc");
@@ -319,7 +324,7 @@ export function TikTokStatsApp() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand"><div className="brand-mark" aria-hidden="true">T</div><div><h1>TikTok 实时数据助手</h1><p className="subtitle">批量获取公开视频与图文的最新互动数据</p></div></div>
+        <div className="brand"><div className="brand-mark" aria-hidden="true">T</div><div><h1>TikTok 实时数据助手</h1><p className="subtitle">专注 TikTok 公开数据、实时查询与分析</p></div></div>
         <div className="online-badge">公网在线版</div>
       </header>
 
@@ -337,7 +342,7 @@ export function TikTokStatsApp() {
             <input ref={fileInput} className="sr-only" type="file" accept=".txt,.csv,text/plain,text/csv" multiple onChange={onFiles} />
             <div className="actions">
               <div className="action-group">
-                <button className="btn btn-primary" type="button" disabled={!parsed.links.length || running} onClick={() => void start()}>开始获取</button>
+                <button className="btn btn-primary" type="button" disabled={!parsed.links.length || running} onClick={() => void start()}>{running ? "正在获取…" : "开始获取"}</button>
                 <button className="btn btn-secondary" type="button" disabled={running} onClick={() => fileInput.current?.click()}>上传 TXT / CSV</button>
                 {running && <button className="btn btn-secondary" type="button" onClick={stop}>停止排队</button>}
               </div>
@@ -345,27 +350,27 @@ export function TikTokStatsApp() {
             </div>
             <p className="inline-note"><strong>已识别 {formatNumber(parsed.links.length)} 条 TikTok 内容</strong>{parsed.ignored ? `，忽略 ${formatNumber(parsed.ignored)} 个其他平台链接` : ""}。支持批量链接，系统会自动排队处理；处理期间请保持页面打开。</p>
           </> : <>
-            <div className="input-head"><div><h2>查询账号公开视频</h2><p className="helper">输入 @用户名或 TikTok 主页链接，自动按时间筛选并汇总</p></div><span className="count-pill">单账号</span></div>
+            <h2 className="sr-only">查询账号公开视频</h2>
             <div className={`profile-form ${rangeMode === "custom" ? "profile-form-custom" : rangeMode === "sevenDays" ? "profile-form-quick" : ""}`}>
-              <label className="field" htmlFor="profile-input"><span>TikTok 账号</span><input id="profile-input" type="text" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder="@_vanybunny_ 或主页链接" /></label>
+              <div className="field"><label htmlFor="profile-input">TikTok 账号</label><div className="field-control"><input id="profile-input" type="text" spellCheck={false} value={profileInput} disabled={running} onChange={(event) => setProfileInput(event.target.value)} placeholder="@_vanybunny_ 或主页链接" />{profileInput && <button className="input-clear" type="button" aria-label="清空 TikTok 账号" disabled={running} onClick={() => setProfileInput("")}>×</button>}</div></div>
               <fieldset className="range-field"><legend>时间范围</legend><div className="range-options">
                 <label><input type="radio" name="range" value="sevenDays" checked={rangeMode === "sevenDays"} disabled={running} onChange={() => setRangeMode("sevenDays")} />近 7 天</label>
                 <label><input type="radio" name="range" value="month" checked={rangeMode === "month"} disabled={running} onChange={() => setRangeMode("month")} />整月</label>
                 <label><input type="radio" name="range" value="custom" checked={rangeMode === "custom"} disabled={running} onChange={() => setRangeMode("custom")} />自定义</label>
               </div></fieldset>
+              {rangeMode === "sevenDays" && <div className="custom-date-fields preset-date-fields"><label className="field" htmlFor="profile-preset-start"><span>开始日期</span><input id="profile-preset-start" type="date" value={beijingDate(-7)} readOnly aria-readonly="true" aria-describedby="profile-range-note" /></label><label className="field" htmlFor="profile-preset-end"><span>结束日期（截至当前）</span><input id="profile-preset-end" type="date" value={beijingDate()} readOnly aria-readonly="true" aria-describedby="profile-range-note" /></label></div>}
               {rangeMode === "month" && <label className="field month-field" htmlFor="profile-month"><span>月份</span><input id="profile-month" type="month" value={month} max={beijingMonth()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => setMonth(event.target.value)} /></label>}
               {rangeMode === "custom" && <div className="custom-date-fields"><label className="field" htmlFor="profile-start-date"><span>开始日期</span><input id="profile-start-date" type="date" value={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => { const value = event.target.value; setCustomStart(value); if (customEnd && value > customEnd) setCustomEnd(value); }} /></label><label className="field" htmlFor="profile-end-date"><span>结束日期（包含当天）</span><input id="profile-end-date" type="date" value={customEnd} min={customStart} max={beijingDate()} disabled={running} aria-describedby="profile-range-note" onChange={(event) => setCustomEnd(event.target.value)} /></label></div>}
             </div>
-            <div className="actions">
-              <div className="action-group"><button className="btn btn-primary" type="button" disabled={!profileInput.trim() || running} onClick={() => void startProfile()}>查询账号数据</button>{running && <button className="btn btn-secondary" type="button" onClick={stop}>停止查询</button>}</div>
-              <button className="btn btn-quiet" type="button" disabled={running} onClick={() => setProfileInput("")}>清空</button>
+            <div className="actions profile-actions">
+              <div className="action-group"><button className="btn btn-primary" type="button" disabled={!profileInput.trim() || running} onClick={() => void startProfile()}>{running ? "正在查询…" : "查询账号数据"}</button>{running && <button className="btn btn-secondary" type="button" onClick={stop}>停止查询</button>}</div>
             </div>
             <p id="profile-range-note" className="inline-note"><strong>自定义范围支持单日查询，最长连续 3 个月</strong>；统计的是该期间发布内容当前的累计数据。</p>
           </>}
         </div>
 
         <aside className="card task-card" aria-label="任务进度">
-          <div className="task-head"><h2>本次任务</h2><span className={`task-state ${taskError ? "task-state-error" : ""}`}>{running ? (mode === "profile" ? "扫描中" : "处理中") : taskError ? "查询失败" : cancelled ? "已停止" : (mode === "profile" ? profileInfo !== null : summary.total > 0) ? "已完成" : "等待开始"}</span></div>
+          <div className="task-head"><h2>本次任务</h2><span className={`task-state task-state-${taskTone}`}>{taskLabel}</span></div>
           {mode === "links" ? <>
             <div className="summary">
               <div className="stat"><span className="stat-label">总链接</span><strong>{formatNumber(summary.total)}</strong></div>
@@ -375,7 +380,7 @@ export function TikTokStatsApp() {
             </div>
             <div className="progress-wrap"><div className="progress-meta"><span>处理进度</span><span>{percent}%</span></div><div className="progress" role="progressbar" aria-label="处理进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><div className="progress-bar" style={{ width: `${percent}%` }} /></div></div>
             <div className="task-message" aria-live="polite">{running ? `正在批量获取，剩余 ${formatNumber(summary.total - summary.done)} 条。` : summary.total ? `本次成功 ${formatNumber(summary.success)} 条，失败 ${formatNumber(summary.failed)} 条。` : "提交后数据会逐条显示在下方。"}</div>
-            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !summary.failed} onClick={() => void retryFailed()}>重试失败项</button><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div>
+            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !summary.failed} onClick={() => void retryFailed()}>重试失败项</button></div>
           </> : <>
             <div className="summary">
               <div className="stat"><span className="stat-label">匹配内容</span><strong>{formatNumber(summary.success)}</strong></div>
@@ -385,13 +390,13 @@ export function TikTokStatsApp() {
             </div>
             <div className="progress-wrap"><div className="progress-meta"><span>账号扫描</span><span>{running ? "进行中" : profileInfo ? "完成" : "等待"}</span></div><div className="progress" role="progressbar" aria-label="账号扫描进度" aria-valuetext={running ? "正在扫描" : "扫描结束"}><div className={`progress-bar ${running ? "progress-scanning" : ""}`} style={{ width: running ? "58%" : profileInfo ? "100%" : "0%" }} /></div></div>
             <div className="task-message" aria-live="polite">{taskError ? <span className="task-error" role="alert">{taskError}</span> : running ? `正在扫描${profileInfo?.username ? ` @${profileInfo.username}` : "账号"}，已查看 ${formatNumber(profileProgress.scanned)} 条。` : cancelled ? "查询已停止，当前结果可以继续查看或导出。" : profileInfo ? `@${profileInfo.username} 在${activeRangeLabel}内共有 ${formatNumber(summary.success)} 条公开内容。` : "输入账号和时间范围后开始查询。"}</div>
-            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !profileInput.trim()} onClick={() => void startProfile()}>重新查询</button><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div>
+            <div className="action-group"><button className="btn btn-secondary" type="button" disabled={running || !profileInput.trim()} onClick={() => void startProfile()}>重新查询</button></div>
           </>}
         </aside>
       </section>
 
       <section className="card results" aria-labelledby="results-title">
-        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileInfo ? `@${profileInfo.username} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-meta">{mode === "profile" ? "以下为查询时的累计公开数据" : "合计仅包含成功结果"}</div></div>
+        <div className="results-head"><div><h2 id="results-title">{mode === "profile" ? "账号查询结果" : "抓取结果"}</h2><div className="results-meta">{mode === "profile" ? `${profileInfo ? `@${profileInfo.username} · ` : ""}${activeRangeLabel || "等待查询"} · ${formatNumber(summary.success)} 条` : `共 ${formatNumber(summary.total)} 条 · 成功 ${formatNumber(summary.success)} · 失败 ${formatNumber(summary.failed)}`}</div></div><div className="results-actions"><span className="results-meta">{mode === "profile" ? "以下为查询时的累计公开数据" : "合计仅包含成功结果"}</span><button className="btn btn-secondary" type="button" disabled={!summary.total} onClick={exportCsv}>导出 CSV</button></div></div>
         <div className="aggregate" aria-label="成功结果数据合计">
           <div className="aggregate-item"><span>总播放量</span><strong title={String(summary.totals.views)}>{formatMetric(summary.totals.views)}</strong></div>
           <div className="aggregate-item"><span>总点赞</span><strong title={String(summary.totals.likes)}>{formatMetric(summary.totals.likes)}</strong></div>
@@ -400,13 +405,13 @@ export function TikTokStatsApp() {
           <div className="aggregate-item"><span>总分享</span><strong title={String(summary.totals.shares)}>{formatMetric(summary.totals.shares)}</strong></div>
         </div>
         <div className="table-wrap">
-          <table><thead><tr><th>#</th><th>状态</th><th>失败原因</th><th>内容</th>{sortableHeader("发布时间", "publishedAt")}{sortableHeader("播放量", "views")}{sortableHeader("点赞", "likes")}{sortableHeader("评论", "comments")}{sortableHeader("收藏", "saves")}{sortableHeader("分享", "shares")}{sortableHeader("抓取时间", "fetchedAt")}<th>链接</th></tr></thead>
+          <table className={mode === "profile" ? "profile-table" : "link-table"}><thead><tr>{mode === "links" && <><th>#</th><th>状态</th><th>失败原因</th></>}<th>内容</th>{sortableHeader("发布时间", "publishedAt")}{sortableHeader("播放量", "views")}{sortableHeader("点赞", "likes")}{sortableHeader("评论", "comments")}{sortableHeader("收藏", "saves")}{sortableHeader("分享", "shares")}{sortableHeader("抓取时间", "fetchedAt")}<th>链接</th></tr></thead>
             <tbody>{visibleResults.length ? visibleResults.map((item, index) => (
-              <tr key={item.key}><td>{(page - 1) * pageSize + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span></td><td className="reason-cell" title={item.error}>{item.status === "error" ? item.error : "—"}</td><td className="video-cell"><strong>{item.author ? `@${item.author}` : `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.description || "等待获取内容信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">打开</a></td></tr>
-            )) : <tr><td className="empty-row" colSpan={12}>{mode === "profile" ? "账号内容会在扫描后显示在这里" : "结果会在这里逐条出现"}</td></tr>}</tbody>
+              <tr key={item.key}>{mode === "links" && <><td>{(page - 1) * pageSize + index + 1}</td><td><span className={`status status-${item.status}`}>{item.status === "queued" ? "等待" : item.status === "running" ? "获取中" : item.status === "success" ? "成功" : "失败"}</span></td><td className="reason-cell" title={item.error}>{item.status === "error" ? item.error : "—"}</td></>}<td className="video-cell"><strong>{item.description || `${item.contentType === "photo" ? "图文" : "视频"} ${item.videoId}`}</strong><span className="description">{item.author ? `@${item.author}` : "等待获取账号信息"}</span></td><td>{item.publishedAt || "—"}</td><td>{item.status === "success" ? formatMetric(item.views) : "—"}</td><td>{item.status === "success" ? formatMetric(item.likes) : "—"}</td><td>{item.status === "success" ? formatMetric(item.comments) : "—"}</td><td>{item.status === "success" ? formatMetric(item.saves) : "—"}</td><td>{item.status === "success" ? formatMetric(item.shares) : "—"}</td><td>{item.fetchedAt || "—"}</td><td><a className="link" href={item.url || item.sourceUrl} target="_blank" rel="noopener noreferrer">查看链接 ↗</a></td></tr>
+            )) : <tr><td className="empty-row" colSpan={mode === "profile" ? 9 : 12}>{mode === "profile" ? "账号内容会在扫描后显示在这里" : "结果会在这里逐条出现"}</td></tr>}</tbody>
           </table>
         </div>
-        <div className="pager"><label className="page-size" htmlFor="page-size"><span>每页显示</span><select id="page-size" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 50 | 100 | 200); setPage(1); }}><option value={50}>50 条</option><option value={100}>100 条</option><option value={200}>200 条</option></select></label><div className="pager-nav"><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div></div>
+        <div className="pager"><div className="page-size" role="group" aria-label="每页显示条数"><span>每页显示</span>{([50, 100, 200] as const).map((size) => <button key={size} className={`page-size-button ${pageSize === size ? "active" : ""}`} type="button" aria-pressed={pageSize === size} onClick={() => { setPageSize(size); setPage(1); }}>{size}</button>)}</div><div className="pager-nav"><span>共 {formatNumber(summary.total)} 条</span><button className="page-button" type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>‹</button><span>第 {page} / {pages} 页</span><button className="page-button" type="button" aria-label="下一页" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>›</button></div></div>
       </section>
       <footer className="footer"><span>仅处理 TikTok 公开内容；私密、删除或地区受限内容无法获取。</span><span>数据为每次查询时 TikTok 返回的公开快照。</span></footer>
     </main>

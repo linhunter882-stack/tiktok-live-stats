@@ -16,6 +16,7 @@ test("renders the finished TikTok data tool", async () => {
   const html = await response.text();
   assert.match(html, /<title>TikTok 实时数据助手<\/title>/);
   assert.match(html, /TikTok 实时数据助手/);
+  assert.match(html, /<meta[^>]+name="viewport"[^>]+width=device-width/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
 });
