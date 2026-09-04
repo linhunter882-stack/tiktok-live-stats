@@ -111,6 +111,55 @@ test("normalizes one public profile page with complete metrics", async () => {
   }
 });
 
+test("uses a verified secUid when TikTok falsely returns 10221 for a public account", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalCode = process.env.ACCESS_CODE;
+  process.env.ACCESS_CODE = "profile-fallback-test";
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://www.tiktok.com/@the9to5edit")) {
+      return new Response('<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{"__DEFAULT_SCOPE__":{"webapp.user-detail":{"statusCode":10221,"statusMsg":""}}}</script>');
+    }
+    if (url.startsWith("https://www.tiktok.com/api/creator/item_list/")) {
+      assert.match(url, /secUid=MS4wLjABAAAABef9113N6hFzyddrU-XEMwvhHeVYK00DTU7KbOEs-0oL5zwJTJ24QVSGe0336Z-2/);
+      return Response.json({
+        statusCode: 0,
+        hasMorePrevious: false,
+        itemList: [{
+          id: "7681150084226059551",
+          createTime: nowSeconds - 60,
+          author: { uniqueId: "the9to5edit", nickname: "NineToMode", verified: false },
+          authorStats: { followerCount: 12, followingCount: 5, heartCount: 1446, videoCount: 261 },
+          stats: { playCount: 99, diggCount: 7, commentCount: 1, collectCount: 2, shareCount: 3 },
+        }],
+      });
+    }
+    throw new Error(`Unexpected upstream request: ${url}`);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("profile-fallback-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(new Request("http://localhost/api/profile", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-access-code": "profile-fallback-test" },
+      body: JSON.stringify({ username: "the9to5edit", cursor: Date.now(), rangeStart: nowSeconds - 86400, rangeEnd: nowSeconds + 1 }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.profile.username, "the9to5edit");
+    assert.equal(data.profile.followerCount, 12);
+    assert.equal(data.profile.videoCount, 261);
+    assert.equal(data.items.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCode === undefined) delete process.env.ACCESS_CODE;
+    else process.env.ACCESS_CODE = originalCode;
+  }
+});
+
 test("sorts the complete result set and keeps unavailable values last", () => {
   const rows = [
     { id: "high", status: "success", publishedAt: "2026-08-03 08:00:00", fetchedAt: "2026-09-02 10:00:00", views: 100, likes: 8, comments: 4, saves: 2, shares: 1 },
